@@ -19,9 +19,9 @@
 - 🎁 [**gift-board**](https://github.com/unbias38/gift-board) — 2026 台灣股東會紀念品查詢看板，700+ 家公司每日自動更新（GAS + Google Sheets + GitHub Pages）。 → [demo](https://unbias38.github.io/gift-board/)
 - 🎭 [**shuihu-108**](https://github.com/unbias38/shuihu-108) — 水滸傳 108 將互動網頁，看人物關係、聽古琴 BGM。 → [demo](https://unbias38.github.io/shuihu-108/)
 - 🧰 [**my-claude-skills**](https://github.com/unbias38/my-claude-skills) — 自己慢慢累積的 Claude Code skill 工具包
-- 📖 [**claude-code-guide**](https://github.com/unbias38/claude-code-guide) — Claude Code 教學
+- 📖 [**claude-code-guide**](https://github.com/unbias38/claude-code-guide) — Claude Code 繁中完全學習指南，34 章教學 + 85 個實作練習，寫給不會寫程式的人。 → [線上讀](https://unbias38.github.io/claude-code-guide/)
 - 🛠 [**hackmd-mcp**](https://github.com/unbias38/hackmd-mcp) — 讓 Claude 自己管 HackMD 筆記的 MCP server
-- 🍃 [**pikmin-mrt-taiwan**](https://github.com/unbias38/pikmin-mrt-taiwan) — Pikmin Bloom × 全台捷運（北/中/高）各站附近能撿哪些裝飾
+- 🍃 [**pikmin-mrt-taiwan**](https://github.com/unbias38/pikmin-mrt-taiwan) — Pikmin Bloom × 全台捷運（北/中/高）各站附近能撿哪些裝飾。 → [demo](https://unbias38.github.io/pikmin-mrt-taiwan/)
 
 ### 愛好
 
