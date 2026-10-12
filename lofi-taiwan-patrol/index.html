@@ -1,0 +1,1035 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台灣慢電視漫遊者</title>
+<meta name="description" content="Lo-Fi Taiwan Patrol MVP：即時鏡頭 + CRT 濾鏡 + 像素貓 + 四軌混音 + 番茄鐘">
+<style>
+:root {
+  --bg: #0d0f12;
+  --panel: rgba(18, 20, 26, 0.72);
+  --panel-solid: #15181e;
+  --line: rgba(255, 255, 255, 0.10);
+  --text: #e9e4d8;
+  --muted: #9a958a;
+  --accent: #f2b45a;     /* 檯燈暖黃 */
+  --accent-2: #7fc8a9;   /* 青草茶綠 */
+  --danger: #e2725b;
+  --radius: 10px;
+  --font: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); }
+body { overflow: hidden; }
+button, select, input { font: inherit; color: inherit; }
+
+/* ---------- 舞台與圖層 ---------- */
+#stage { position: fixed; inset: 0; overflow: hidden; background: #000; }
+.layer { position: absolute; inset: 0; }
+#layer0 { z-index: 0; }
+#layer0.soft-focus { filter: blur(0.7px) saturate(0.88) contrast(1.04); }
+#yt-host, #yt-host iframe, #hls-video, #fallback {
+  position: absolute; inset: 0; width: 100%; height: 100%; border: 0;
+}
+#hls-video { object-fit: cover; background: #000; }
+#yt-host iframe { pointer-events: none; transform: scale(1.02); } /* 放大 2% 把 YouTube 邊角資訊推出畫面 */
+#fallback { image-rendering: pixelated; display: none; }
+
+/* Layer 0 後製：CRT 掃描線、暗角、顆粒 */
+#fx { z-index: 1; pointer-events: none; }
+#fx .scan {
+  position: absolute; inset: 0; opacity: 0;
+  background: repeating-linear-gradient(to bottom, rgba(0,0,0,0.0) 0px, rgba(0,0,0,0.0) 2px, rgba(0,0,0,0.28) 3px);
+  mix-blend-mode: multiply; transition: opacity .4s;
+}
+#fx .vignette {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%);
+}
+#fx canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; mix-blend-mode: overlay; image-rendering: pixelated; transition: opacity .4s; }
+#stage.crt #fx .scan { opacity: 1; animation: flicker 0.12s steps(2) infinite; }
+#stage.crt #fx canvas { opacity: 0.22; }
+@keyframes flicker { 0% { opacity: .96 } 100% { opacity: 1 } }
+
+/* Layer 1：窗框 */
+#layer1 { z-index: 2; pointer-events: none;
+  box-shadow: inset 0 0 0 14px #2a1f17, inset 0 0 0 16px #120d0a, inset 0 0 60px rgba(0,0,0,.6); }
+#rain { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
+#stage.raining #rain { display: block; }
+
+/* Layer 2 + 3：寵物與桌面 */
+#layer2 { z-index: 3; pointer-events: none; }
+#pet {
+  position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+  width: min(720px, 100%); aspect-ratio: 160 / 54; image-rendering: pixelated; pointer-events: auto; cursor: pointer;
+}
+
+/* Layer 4：UI */
+#ui { z-index: 4; pointer-events: none; }
+.bar {
+  pointer-events: auto; position: absolute; left: 16px; right: 16px; top: 16px;
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  opacity: .25; transition: opacity .3s;
+}
+.bar:hover, .bar:focus-within, body.ui-awake .bar { opacity: 1; }
+.bar .title { font-weight: 700; letter-spacing: .04em; margin-right: 4px; white-space: nowrap; }
+.bar .title small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+.grow { flex: 1 1 220px; min-width: 0; }
+select, input[type=text] {
+  width: 100%; background: rgba(0,0,0,.35); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px;
+}
+.btn {
+  background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 10px; cursor: pointer; white-space: nowrap;
+}
+.btn:hover { background: rgba(255,255,255,.12); }
+.btn[aria-pressed="true"] { background: var(--accent); color: #1a1208; border-color: transparent; }
+.btn:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.status {
+  pointer-events: none; position: absolute; left: 16px; top: 76px; font: 12px/1.4 var(--mono);
+  color: var(--muted); background: rgba(0,0,0,.4); padding: 4px 8px; border-radius: 6px; max-width: calc(100% - 32px);
+}
+.status b { color: var(--text); font-weight: 600; }
+.status .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; background: var(--muted); }
+.status .dot.live { background: #e5484d; box-shadow: 0 0 6px #e5484d; }
+.status .dot.retry { background: var(--accent); }
+
+.dock {
+  pointer-events: auto; position: absolute; right: 16px; bottom: 16px; width: 300px; max-width: calc(100% - 32px);
+  padding: 12px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  display: grid; gap: 10px; opacity: .35; transition: opacity .3s;
+}
+.dock:hover, .dock:focus-within, body.ui-awake .dock { opacity: 1; }
+.mix-wrap summary { cursor: pointer; list-style: none; margin-bottom: 6px; }
+.mix-wrap summary::-webkit-details-marker { display: none; }
+.mix-wrap summary h2::after { content: " ▾"; }
+.mix-wrap:not([open]) summary h2::after { content: " ▸"; }
+.dock h2 { margin: 0; font-size: 12px; letter-spacing: .12em; color: var(--muted); font-weight: 600; }
+.timer { font: 600 40px/1 var(--mono); letter-spacing: .04em; text-align: center; }
+.timer-sub { text-align: center; font-size: 12px; color: var(--muted); }
+.row { display: flex; gap: 6px; align-items: center; }
+.row > .btn { flex: 1; }
+.mix { display: grid; grid-template-columns: 70px 1fr 34px; gap: 4px 8px; align-items: center; font-size: 12px; }
+.mix input[type=range] { width: 100%; accent-color: var(--accent); }
+.mix output { font-family: var(--mono); color: var(--muted); text-align: right; }
+.points { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+.points b { color: var(--accent-2); font-family: var(--mono); font-size: 14px; }
+.toast {
+  position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); pointer-events: none;
+  background: rgba(0,0,0,.7); padding: 10px 16px; border-radius: 8px; opacity: 0; transition: opacity .4s; font-size: 14px;
+}
+.toast.show { opacity: 1; }
+
+/* 迷你伴讀模式：只留畫面 + 計時器 */
+body.mini .bar, body.mini .status, body.mini .dock .mix-wrap, body.mini .dock .points, body.mini #layer1 { display: none; }
+body.mini .dock { opacity: .85; width: 200px; padding: 8px; }
+body.mini .timer { font-size: 28px; }
+
+@media (max-width: 640px) {
+  .dock { left: 16px; right: 16px; width: auto; bottom: 12px; }
+  #pet { bottom: 0; }
+  .bar .title small { display: none; }
+  /* 手機：面板移到工具列下方，畫面底部留給貓和桌面（canvas 高 = 寬 × 54/160） */
+  .dock { top: 168px; bottom: auto; }
+  .status { top: auto; bottom: calc(100vw * 0.3375 + 6px); left: 16px; right: 16px; font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #stage.crt #fx .scan { animation: none; }
+}
+</style>
+</head>
+<body>
+<div id="stage" class="crt">
+  <div id="layer0" class="layer">
+    <div id="yt-host"></div>
+    <video id="hls-video" muted playsinline autoplay></video>
+    <canvas id="fallback" width="320" height="180"></canvas>
+  </div>
+  <div id="fx" class="layer"><div class="scan"></div><canvas id="grain" width="240" height="135"></canvas><div class="vignette"></div></div>
+  <div id="layer1" class="layer"><canvas id="rain"></canvas></div>
+  <div id="layer2" class="layer"><canvas id="pet" width="160" height="54" title="摸摸貓咪"></canvas></div>
+
+  <div id="ui" class="layer">
+    <div class="bar" role="toolbar" aria-label="鏡頭控制">
+      <span class="title">台灣慢電視<small>Lo-Fi Taiwan Patrol</small></span>
+      <div class="grow"><select id="cam-select" aria-label="選擇鏡頭"><option>載入鏡頭清單中…</option></select></div>
+      <div class="grow"><input id="url-input" type="text" placeholder="或貼上 YouTube / .m3u8 網址後按 Enter" aria-label="自訂串流網址"></div>
+      <button class="btn" id="btn-smart" title="依現在時段挑鏡頭">智慧輪播</button>
+      <button class="btn" id="btn-crt" aria-pressed="true">CRT</button>
+      <button class="btn" id="btn-blur" aria-pressed="false">柔焦</button>
+      <button class="btn" id="btn-rain" aria-pressed="false">雨窗</button>
+      <button class="btn" id="btn-mini" aria-pressed="false">迷你</button>
+      <button class="btn" id="btn-full">全螢幕</button>
+    </div>
+    <div class="status" id="status"><span class="dot"></span>待機中</div>
+    <div class="toast" id="toast"></div>
+
+    <section class="dock" aria-label="伴讀面板">
+      <div>
+        <h2 id="timer-label">番茄鐘・專注</h2>
+        <div class="timer" id="timer">25:00</div>
+        <div class="timer-sub" id="timer-sub">第 1 輪 / 長休息在第 4 輪後</div>
+      </div>
+      <div class="row">
+        <button class="btn" id="btn-start">開始</button>
+        <button class="btn" id="btn-reset">重設</button>
+        <button class="btn" id="btn-mode" aria-pressed="false" title="切換番茄鐘 / 自由慢電視">自由模式</button>
+      </div>
+      <div class="points"><span>心靈點數 MP</span><b id="mp">0</b></div>
+      <details class="mix-wrap" id="mix-wrap" open>
+        <summary><h2>混音台</h2></summary>
+        <div class="mix" id="mixer">
+          <label for="v-bgm">Lo-Fi</label><input id="v-bgm" type="range" min="0" max="100" value="45"><output>45</output>
+          <label for="v-amb">環境音</label><input id="v-amb" type="range" min="0" max="100" value="55"><output>55</output>
+          <label for="v-asmr">桌面音</label><input id="v-asmr" type="range" min="0" max="100" value="25"><output>25</output>
+          <label for="v-live">直播原音</label><input id="v-live" type="range" min="0" max="100" value="0"><output>0</output>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <select id="asmr-select" aria-label="桌面白噪音">
+            <option value="typing">鍵盤打字</option>
+            <option value="ice">手搖飲冰塊</option>
+            <option value="purr">貓咪呼嚕</option>
+            <option value="pencil">紙筆書寫</option>
+          </select>
+          <button class="btn" id="btn-lpf" aria-pressed="false" title="Lo-Fi 低通濾波">悶音</button>
+          <button class="btn" id="btn-audio">開聲音</button>
+        </div>
+      </details>
+    </section>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* =========================================================================
+ * 0. 共用工具
+ * ========================================================================= */
+const $ = (s) => document.querySelector(s);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* 隱私模式：不保存 */ } },
+};
+function toast(msg, ms = 2200) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), ms);
+}
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement("script"); s.src = src; s.async = true;
+    s.onload = res; s.onerror = () => rej(new Error("script load failed: " + src));
+    document.head.appendChild(s);
+  });
+}
+// 時段定義與 cameras.json 的 time_slots 一致
+function currentSlot(d = new Date()) {
+  const h = d.getHours();
+  if (h >= 5 && h < 8) return "dawn";
+  if (h >= 8 && h < 17) return "day";
+  if (h >= 17 && h < 19) return "dusk";
+  return "night";
+}
+
+/* =========================================================================
+ * 1. 鏡頭清單（優先讀 cameras.json，用 file:// 開啟時改用內建樣本）
+ * ========================================================================= */
+const SAMPLE_CAMERAS = [
+  { id: "yt-0c98b6c55cc7f9fd", name: "九份即時影像", type: "yt", stream_url: "https://www.youtube.com/watch?v=XSD5ptYisw8", category: "city_traffic", time_suitability: ["day", "dusk"], ambient_sound_profile: "old_street_crowd" },
+  { id: "yt-a400a9c7679c7bb4", name: "基隆海洋廣場", type: "yt", stream_url: "https://www.youtube.com/watch?v=TUYZ7-9-rWw", category: "ocean", time_suitability: ["day", "dusk"], ambient_sound_profile: "harbor_dock" },
+  { id: "yt-2lVMTs_Fj0M", name: "合歡山武嶺亭", type: "yt", stream_url: "https://www.youtube.com/watch?v=2lVMTs_Fj0M", category: "mountain", time_suitability: ["dawn", "day"], ambient_sound_profile: "alpine_wind" },
+  { id: "yt-z_fY1pj1VBw", name: "象山看台北", type: "yt", stream_url: "https://www.youtube.com/watch?v=z_fY1pj1VBw", category: "mountain", time_suitability: ["dusk", "night"], ambient_sound_profile: "city_night_view" },
+  { id: "hls-C000452", name: "新北 中原二街-中原五街", type: "hls", stream_url: "https://cctvatis5.ntpc.gov.tw/hls/C000452/live.m3u8", category: "city_traffic", time_suitability: ["dusk", "night"], ambient_sound_profile: "city_intersection" },
+];
+let CAMERAS = [];
+const CATEGORY_LABEL = { mountain: "山", ocean: "海", island: "離島", waterfront: "水岸", city_traffic: "城市" };
+
+async function loadCameras() {
+  try {
+    const r = await fetch("cameras.json", { cache: "no-cache" });
+    if (!r.ok) throw new Error(r.status);
+    const doc = await r.json();
+    // 臺北 bote 播放器頁（needs_resolve）前端無法直接播，先過濾掉
+    CAMERAS = doc.cameras.filter((c) => !(c.player && c.player.needs_resolve) && !c.duplicate_of);
+  } catch {
+    CAMERAS = SAMPLE_CAMERAS;
+  }
+  const sel = $("#cam-select");
+  sel.innerHTML = '<option value="" hidden>（自訂網址）</option>';
+  const groups = {};
+  for (const c of CAMERAS) (groups[c.category] ||= []).push(c);
+  for (const [cat, list] of Object.entries(groups)) {
+    const og = document.createElement("optgroup"); og.label = `${CATEGORY_LABEL[cat] || cat}（${list.length}）`;
+    for (const c of list) {
+      const o = document.createElement("option"); o.value = c.id;
+      o.textContent = `${c.type === "yt" ? "▶" : "◉"} ${c.name}`; og.appendChild(o);
+    }
+    sel.appendChild(og);
+  }
+}
+const camById = (id) => CAMERAS.find((c) => c.id === id);
+function smartPick(exceptId) {
+  const slot = currentSlot();
+  let pool = CAMERAS.filter((c) => c.id !== exceptId && (c.time_suitability.includes(slot) || c.time_suitability.includes("all")));
+  // 慢電視以 YouTube 景觀為主：權重 3:1
+  pool = pool.flatMap((c) => (c.type === "yt" ? [c, c, c] : [c]));
+  return pool.length ? pick(pool) : pick(CAMERAS);
+}
+
+/* =========================================================================
+ * 2. 視訊播放管線：自動判斷 YouTube / HLS，含斷流偵測與退避重試
+ * ========================================================================= */
+const YT_RE = /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|live\/|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/;
+function detectStream(url) {
+  const u = (url || "").trim();
+  const m = u.match(YT_RE);
+  if (m) return { kind: "yt", id: m[1], url: u };
+  if (/\.m3u8(\?|#|$)/i.test(u)) return { kind: "hls", url: u };
+  return { kind: "unknown", url: u };
+}
+
+const POLICY = {
+  yt:  { loadTimeout: 20000, stallTimeout: 15000, backoff: [2000, 5000, 15000, 60000] },
+  hls: { loadTimeout: 12000, stallTimeout: 8000,  backoff: [1000, 3000, 8000, 20000] },
+};
+const HLS_JS_SRC = "https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js";
+const YT_API_SRC = "https://www.youtube.com/iframe_api";
+
+const Player = {
+  token: 0,              // 每次切台遞增，讓舊的非同步回呼自動失效
+  current: null,         // { stream, cam }
+  yt: null, hls: null, attempt: 0,
+  timers: [],
+  liveVolume: 0,
+
+  clearTimers() { this.timers.forEach(clearTimeout); this.timers = []; clearInterval(this.ytPoll); },
+  later(fn, ms) { const t = setTimeout(fn, ms); this.timers.push(t); return t; },
+
+  // hls.js 不能在自己的事件回呼裡同步 destroy，延到下一個 tick
+  dropHls() { const h = this.hls; this.hls = null; if (h) setTimeout(() => h.destroy(), 0); },
+
+  teardown() {
+    this.clearTimers();
+    this.dropHls();
+    const v = $("#hls-video"); v.removeAttribute("src"); v.load(); v.style.display = "none";
+    if (this.yt) { try { this.yt.destroy(); } catch {} this.yt = null; }
+    $("#yt-host").innerHTML = "";
+  },
+
+  async play(stream, cam = null) {
+    this.teardown();
+    this.attempt = 0;
+    this.current = { stream, cam };
+    if (!cam) $("#cam-select").value = "";
+    Sound.setAmbientProfile(cam ? cam.ambient_sound_profile : guessProfile(stream));
+    Pet.setScene(cam ? cam.category : "city_traffic");
+    this.start();
+  },
+
+  start() {
+    const my = ++this.token;
+    const { stream, cam } = this.current;
+    const name = cam ? cam.name : stream.url;
+    if (stream.kind === "unknown") {
+      setStatus("fail", `無法辨識的網址格式`, name);
+      Fallback.show(cam ? cam.category : "city_traffic", "格式不支援");
+      return;
+    }
+    setStatus("retry", this.attempt ? `重新連線（第 ${this.attempt} 次）` : "連線中", name);
+    Fallback.show("snow");
+    const p = POLICY[stream.kind];
+    // 載入逾時：時間內沒進入播放狀態就算失敗
+    this.later(() => { if (my === this.token && !this.playing) this.fail(my, "載入逾時"); }, p.loadTimeout);
+    this.playing = false;
+    (stream.kind === "yt" ? this.startYT(stream, my) : this.startHLS(stream, my))
+      .catch((e) => this.fail(my, e.message || "播放器載入失敗"));
+  },
+
+  onPlaying(my) {
+    if (my !== this.token) return;
+    this.playing = true; this.attempt = 0;
+    Fallback.hide();
+    const { stream, cam } = this.current;
+    setStatus("live", stream.kind === "yt" ? "YouTube 直播" : "HLS 即時影像", cam ? cam.name : stream.url);
+  },
+
+  // 卡住偵測：stallTimeout 內沒有恢復播放就判定斷流
+  onStall(my) {
+    if (my !== this.token || !this.playing) return;
+    clearTimeout(this.stallTimer);
+    this.stallTimer = this.later(() => {
+      if (my === this.token && !this.resumed) this.fail(my, "串流卡住");
+    }, POLICY[this.current.stream.kind].stallTimeout);
+    this.resumed = false;
+  },
+  onResume(my) { if (my === this.token) { this.resumed = true; clearTimeout(this.stallTimer); } },
+
+  fail(my, reason) {
+    if (my !== this.token) return;
+    this.token++;           // 讓這一輪的所有回呼失效
+    this.playing = false;
+    const { stream, cam } = this.current;
+    const backoff = POLICY[stream.kind]?.backoff || [];
+    Fallback.show(cam ? cam.category : "city_traffic", reason);
+    if (this.attempt < backoff.length) {
+      const wait = backoff[this.attempt++];
+      setStatus("retry", `${reason}，${Math.round(wait / 1000)} 秒後重試（${this.attempt}/${backoff.length}）`, cam ? cam.name : stream.url);
+      this.clearTimers(); this.dropHls();
+      this.later(() => this.start(), wait);
+    } else {
+      setStatus("fail", `${reason}，已放棄`, cam ? cam.name : stream.url);
+      if (cam && CAMERAS.length > 1) {   // 清單裡的鏡頭：自動換下一台
+        this.later(() => { const n = smartPick(cam.id); selectCamera(n.id); toast(`訊號中斷，換到「${n.name}」`); }, 4000);
+      }
+    }
+  },
+
+  /* ---- YouTube IFrame Player API ---- */
+  ytReady: null,
+  ensureYT() {
+    if (window.YT && window.YT.Player) return Promise.resolve();
+    if (!this.ytReady) {
+      this.ytReady = new Promise((res, rej) => {
+        window.onYouTubeIframeAPIReady = res;
+        loadScript(YT_API_SRC).catch((e) => { this.ytReady = null; rej(e); });
+      });
+    }
+    return this.ytReady;
+  },
+  async startYT(stream, my) {
+    await this.ensureYT();
+    if (my !== this.token) return;
+    const host = document.createElement("div"); $("#yt-host").appendChild(host);
+    this.yt = new YT.Player(host, {
+      videoId: stream.id,
+      host: "https://www.youtube-nocookie.com",
+      playerVars: {
+        autoplay: 1, mute: 1, controls: 0, disablekb: 1, fs: 0, rel: 0,
+        modestbranding: 1, iv_load_policy: 3, playsinline: 1, cc_load_policy: 0,
+        loop: 1, playlist: stream.id,     // 非直播影片播完自動循環
+      },
+      events: {
+        onReady: (e) => { if (my !== this.token) return; e.target.mute(); e.target.playVideo(); this.applyLiveVolume(); },
+        onStateChange: (e) => {
+          if (my !== this.token) return;
+          if (e.data === YT.PlayerState.PLAYING) { this.playing ? this.onResume(my) : this.onPlaying(my); }
+          else if (e.data === YT.PlayerState.BUFFERING || e.data === YT.PlayerState.PAUSED) this.onStall(my);
+          else if (e.data === YT.PlayerState.ENDED) e.target.playVideo();
+        },
+        // 2 參數錯誤 / 5 HTML5 錯誤 / 100 影片不存在 / 101、150 禁止嵌入
+        onError: (e) => this.fail(my, `YouTube 錯誤碼 ${e.data}`),
+      },
+    });
+  },
+
+  /* ---- HLS：hls.js（MSE 硬體解碼），Safari 走原生 HLS ---- */
+  async startHLS(stream, my) {
+    const v = $("#hls-video");
+    v.style.display = "block"; v.muted = true;
+    const onPlaying = () => (this.playing ? this.onResume(my) : this.onPlaying(my));
+    v.onplaying = onPlaying;
+    v.onwaiting = () => this.onStall(my);
+    v.onstalled = () => this.onStall(my);
+    v.onerror = () => this.fail(my, "影片元素錯誤");
+
+    if (!v.canPlayType("application/vnd.apple.mpegurl") || window.MediaSource) {
+      if (!window.Hls) await loadScript(HLS_JS_SRC);
+      if (my !== this.token) return;
+    }
+    if (window.Hls && Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true, lowLatencyMode: false,
+        backBufferLength: 10,              // 長時間掛機：只留 10 秒舊緩衝，壓低記憶體
+        maxBufferLength: 12, maxMaxBufferLength: 20,
+        manifestLoadingTimeOut: 8000, manifestLoadingMaxRetry: 1,
+        fragLoadingTimeOut: 10000, fragLoadingMaxRetry: 2,
+        liveSyncDurationCount: 3,
+      });
+      this.hls = hls;
+      let mediaRecovered = false;
+      hls.on(Hls.Events.ERROR, (_, d) => {
+        if (my !== this.token || !d.fatal) return;
+        if (d.type === Hls.ErrorTypes.MEDIA_ERROR && !mediaRecovered) { mediaRecovered = true; hls.recoverMediaError(); return; }
+        this.fail(my, `HLS ${d.details}`);
+      });
+      hls.on(Hls.Events.MANIFEST_PARSED, () => v.play().catch(() => {}));
+      hls.loadSource(stream.url);
+      hls.attachMedia(v);
+    } else if (v.canPlayType("application/vnd.apple.mpegurl")) {
+      v.src = stream.url; v.play().catch(() => {});
+    } else {
+      throw new Error("此瀏覽器不支援 HLS");
+    }
+    this.applyLiveVolume();
+  },
+
+  setLiveVolume(v01) { this.liveVolume = v01; this.applyLiveVolume(); },
+  applyLiveVolume() {
+    const vol = this.liveVolume * Sound.masterLevel();
+    if (this.yt && this.yt.setVolume) {
+      try { this.yt.setVolume(Math.round(vol * 100)); vol > 0 ? this.yt.unMute() : this.yt.mute(); } catch {}
+    }
+    const v = $("#hls-video"); v.volume = clamp(vol, 0, 1); v.muted = vol === 0;
+  },
+};
+
+function guessProfile(stream) { return stream.kind === "hls" ? "city_intersection" : "ocean_waves"; }
+
+function setStatus(state, text, name) {
+  const dot = state === "live" ? "live" : state === "retry" ? "retry" : "";
+  $("#status").innerHTML = `<span class="dot ${dot}"></span><b></b> · <span></span>`;
+  $("#status b").textContent = name || "";
+  $("#status span:last-child").textContent = text;
+}
+
+function selectCamera(id) {
+  const cam = camById(id); if (!cam) return;
+  $("#cam-select").value = id;
+  store.set("lastCam", id);
+  Player.play(detectStream(cam.stream_url), cam);
+}
+
+/* =========================================================================
+ * 3. 斷流降級畫面：雪花 / VHS 維護畫面 / 雨窗
+ * ========================================================================= */
+const Fallback = {
+  cv: $("#fallback"), ctx: $("#fallback").getContext("2d"), mode: null, reason: "", raf: 0, t0: 0,
+  show(category, reason = "") {
+    const mode = category === "snow" ? "snow" : category === "city_traffic" ? "vhs" : "rain";
+    this.reason = reason;
+    if (this.mode === mode) return;
+    this.mode = mode; this.cv.style.display = "block"; this.t0 = performance.now();
+    cancelAnimationFrame(this.raf); this.loop();
+  },
+  hide() { this.mode = null; this.cv.style.display = "none"; cancelAnimationFrame(this.raf); },
+  loop() {
+    const now = performance.now();
+    if (!this.last || now - this.last > 66) { this.last = now; this.draw(now - this.t0); } // 15fps 就夠了
+    this.raf = requestAnimationFrame(() => this.loop());
+  },
+  draw(t) {
+    const { ctx, cv } = this; const W = cv.width, H = cv.height;
+    if (this.mode === "snow") {
+      const img = ctx.createImageData(W, H), d = img.data;
+      for (let i = 0; i < d.length; i += 4) { const g = Math.random() * 255 | 0; d[i] = d[i + 1] = d[i + 2] = g; d[i + 3] = 255; }
+      ctx.putImageData(img, 0, 0);
+      const band = (t / 8) % H; ctx.fillStyle = "rgba(255,255,255,.12)"; ctx.fillRect(0, band, W, 6);
+    } else if (this.mode === "vhs") {
+      ctx.fillStyle = "#1b2a8f"; ctx.fillRect(0, 0, W, H);
+      for (let y = 0; y < H; y += 3) { ctx.fillStyle = `rgba(255,255,255,${Math.random() * 0.04})`; ctx.fillRect(0, y, W, 1); }
+      const ty = (t / 30) % (H + 20) - 10; ctx.fillStyle = "rgba(255,255,255,.18)"; ctx.fillRect(0, ty, W, 4);
+      ctx.fillStyle = "#fff"; ctx.font = "bold 12px monospace";
+      ctx.fillText("▶ PLAY", 14, 22);
+      ctx.fillText("SP  " + new Date().toLocaleTimeString("zh-TW", { hour12: false }), W - 110, 22);
+      ctx.font = "bold 14px sans-serif"; ctx.textAlign = "center";
+      ctx.fillText("訊號維護中・請稍候", W / 2, H / 2 - 4);
+      ctx.font = "11px sans-serif"; ctx.fillText(this.reason || "STAND BY", W / 2, H / 2 + 16); ctx.textAlign = "start";
+    } else if (this.mode === "rain") {
+      const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#1d2833"); g.addColorStop(1, "#33424d");
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "rgba(255,210,140,.10)"; ctx.beginPath(); ctx.arc(W * 0.72, H * 0.38, 40, 0, 7); ctx.fill(); // 遠方路燈
+      this.drops ||= Array.from({ length: 70 }, () => ({ x: rand(0, W), y: rand(0, H), v: rand(0.3, 1.4), r: rand(0.6, 2) }));
+      ctx.fillStyle = "rgba(200,220,235,.55)";
+      for (const d of this.drops) { d.y += d.v; if (d.y > H) { d.y = -4; d.x = rand(0, W); } ctx.fillRect(d.x | 0, d.y | 0, 1, d.r * 2 | 0); }
+      ctx.fillStyle = "rgba(255,255,255,.75)"; ctx.font = "11px sans-serif"; ctx.textAlign = "center";
+      ctx.fillText("鏡頭暫時休息中，先聽雨吧", W / 2, H * 0.3); ctx.textAlign = "start";
+    }
+  },
+};
+
+/* =========================================================================
+ * 4. CRT 顆粒（低解析 + 12fps，背景分頁時自動停）與 Layer 1 雨滴
+ * ========================================================================= */
+const Grain = {
+  cv: $("#grain"), ctx: $("#grain").getContext("2d"), on: true,
+  tick() {
+    if (this.on && !document.hidden) {
+      const { cv, ctx } = this; const img = ctx.createImageData(cv.width, cv.height), d = img.data;
+      for (let i = 0; i < d.length; i += 4) { const g = 128 + (Math.random() - 0.5) * 120 | 0; d[i] = d[i + 1] = d[i + 2] = g; d[i + 3] = 255; }
+      ctx.putImageData(img, 0, 0);
+    }
+    setTimeout(() => this.tick(), 83);
+  },
+};
+const Rain = {
+  cv: $("#rain"), drops: [], on: false,
+  start() {
+    this.on = true; const cv = this.cv; cv.width = innerWidth; cv.height = innerHeight;
+    this.drops = Array.from({ length: 90 }, () => ({ x: rand(0, cv.width), y: rand(0, cv.height), r: rand(1.5, 4), v: rand(0.05, 0.6) }));
+    this.loop();
+  },
+  stop() { this.on = false; },
+  loop() {
+    if (!this.on) return;
+    const { cv } = this, ctx = cv.getContext("2d"); ctx.clearRect(0, 0, cv.width, cv.height);
+    for (const d of this.drops) {
+      d.y += d.v * (d.r / 2); if (d.y > cv.height + 10) { d.y = -10; d.x = rand(0, cv.width); }
+      ctx.fillStyle = "rgba(220,235,245,.35)"; ctx.beginPath(); ctx.ellipse(d.x, d.y, d.r * 0.7, d.r, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.5)"; ctx.fillRect(d.x - d.r * 0.25, d.y - d.r * 0.5, 1, 1);
+    }
+    requestAnimationFrame(() => this.loop());
+  },
+};
+
+/* =========================================================================
+ * 5. 像素貓：行為樹（Selector → 條件節點 → 動作），Layer 2 + Layer 3 桌面擺件
+ * ========================================================================= */
+const Pet = {
+  cv: $("#pet"), ctx: $("#pet").getContext("2d"),
+  x: 60, dir: 1, action: "idle", actionUntil: 0, pettedAt: -1e9, lastInput: performance.now(),
+  scene: "city_traffic", beatPhase: 0,
+  setScene(cat) { this.scene = cat; },
+  // 行為樹：由上而下第一個成立的分支勝出
+  decide(now) {
+    const focusing = Pomodoro.running && Pomodoro.phase === "focus";
+    const idleMin = (now - this.lastInput) / 60000;
+    const h = new Date().getHours();
+    if (now - this.pettedAt < 4000) return ["purr", 4000];
+    if (Pomodoro.justFinished && now - Pomodoro.justFinished < 5000) return ["stretch", 3000];
+    if (focusing) return [Sound.bgmOn && Math.random() < 0.5 ? "beat" : "sit", rand(8000, 14000)];
+    if (idleMin > 3 || h >= 23 || h < 5) return ["doze", rand(20000, 40000)];
+    const w = [
+      ["walk", 30], ["sit", 20], ["watch", this.scene === "city_traffic" ? 25 : 10],
+      ["beat", Sound.bgmOn ? 15 : 0], ["stretch", 8], ["groom", 12], ["doze", 10],
+    ];
+    let r = Math.random() * w.reduce((s, [, n]) => s + n, 0);
+    for (const [a, n] of w) { if ((r -= n) < 0) return [a, a === "walk" ? rand(3000, 6000) : rand(5000, 12000)]; }
+    return ["sit", 8000];
+  },
+  update(now, dt) {
+    if (now > this.actionUntil) { const [a, ms] = this.decide(now); this.action = a; this.actionUntil = now + ms; if (a === "walk") this.dir = this.x > 120 ? -1 : this.x < 30 ? 1 : pick([-1, 1]); }
+    if (this.action === "walk") { this.x = clamp(this.x + this.dir * dt * 0.012, 18, 142); if (this.x <= 18 || this.x >= 142) this.dir *= -1; }
+  },
+  draw(now) {
+    const c = this.ctx; c.clearRect(0, 0, 160, 54);
+    // Layer 3 桌面
+    c.fillStyle = "#5b3d27"; c.fillRect(0, 44, 160, 10);
+    c.fillStyle = "#6e4b31"; c.fillRect(0, 44, 160, 2);
+    this.drawBoba(c, 8, 26); this.drawLamp(c, 140, 14); this.drawCooker(c, 112, 32);
+
+    const a = this.action, X = Math.round(this.x), B = 44;
+    const breathT = a === "doze" ? 5000 : 3000;
+    const breath = Math.sin((now / breathT) * Math.PI * 2) > 0 ? 1 : 0; // 1px 呼吸
+    const beat = a === "beat" ? (Math.floor(now / (60000 / Sound.BPM)) % 2) : 0;
+    const K = "#2b2522", O = "#e9a35b", W = "#fff3e0", P = "#f08a8a";
+    const px = (x, y, w, h, col) => { c.fillStyle = col; c.fillRect(x, y, w, h); };
+    const f = this.dir; // 朝向
+
+    if (a === "doze") {
+      px(X - 10, B - 7 - breath, 20, 7 + breath, O); px(X - 10, B - 7 - breath, 20, 1, K);
+      px(X + 6 * f - 3, B - 10 - breath, 8, 7, O);                 // 頭
+      px(X + 6 * f - 3, B - 12 - breath, 2, 2, O); px(X + 6 * f + 3, B - 12 - breath, 2, 2, O);
+      px(X + 6 * f - 1, B - 7 - breath, 2, 1, K); px(X + 6 * f + 2, B - 7 - breath, 2, 1, K); // 閉眼
+      px(X - 12 * f - (f < 0 ? 2 : 0), B - 3, 6, 2, O);              // 尾巴捲著
+      const z = Math.floor(now / 700) % 3;                           // Zzz
+      c.fillStyle = "rgba(255,255,255,.8)"; c.font = "6px monospace";
+      for (let i = 0; i <= z; i++) c.fillText("z", X + 10 + i * 4, B - 14 - i * 4);
+      return;
+    }
+    const stretch = a === "stretch" ? Math.sin(((now % 3000) / 3000) * Math.PI) : 0;
+    const bodyW = 12 + Math.round(stretch * 6), bodyH = 9 - Math.round(stretch * 3);
+    const by = B - bodyH - breath;
+    px(X - bodyW / 2, by, bodyW, bodyH + breath, O);                // 身體
+    px(X - bodyW / 2 + 3, by + 3, 5, bodyH - 3, W);                  // 肚子
+    const legPhase = a === "walk" ? Math.floor(now / 150) % 2 : 0;
+    px(X - bodyW / 2 + 1, B - 2, 2, 2 + legPhase, K); px(X + bodyW / 2 - 3, B - 2, 2, 2 + (1 - legPhase), K);
+    // 頭：watch 時抬頭看螢幕
+    const look = a === "watch" ? -3 : a === "groom" ? 2 : 0;
+    const hx = X + (bodyW / 2 - 2) * f - 4, hy = by - 7 + look - beat;
+    px(hx, hy, 9, 8, O);
+    px(hx, hy - 2, 2, 2, O); px(hx + 7, hy - 2, 2, 2, O);           // 耳朵
+    px(hx + 1, hy - 1, 1, 1, P); px(hx + 7, hy - 1, 1, 1, P);
+    const blink = (now % 4200) < 140;
+    if (a === "purr" || blink) { px(hx + 2, hy + 3, 2, 1, K); px(hx + 5, hy + 3, 2, 1, K); }
+    else { px(hx + 2, hy + 2, 2, 2, K); px(hx + 5, hy + 2, 2, 2, K); px(hx + 2, hy + 2, 1, 1, W); px(hx + 5, hy + 2, 1, 1, W); }
+    px(hx + 4, hy + 5, 1, 1, P);
+    if (a === "groom") px(hx + 3 + f, hy + 6, 3, 2, W);              // 舔爪
+    // 尾巴：beat 時跟著 BPM 甩，其他時候慢慢晃
+    const tailUp = a === "beat" ? beat * 3 : Math.round(Math.sin(now / 600) * 1.5);
+    const tx = f > 0 ? X - bodyW / 2 - 2 : X + bodyW / 2;
+    px(tx, by - 4 - tailUp, 2, 6 + tailUp, O);
+    if (a === "purr") {                                               // 愛心
+      const hy2 = hy - 6 - ((now / 120) % 8);
+      px(hx + 10, hy2, 2, 1, P); px(hx + 13, hy2, 2, 1, P); px(hx + 10, hy2 + 1, 5, 1, P); px(hx + 11, hy2 + 2, 3, 1, P); px(hx + 12, hy2 + 3, 1, 1, P);
+    }
+    if (a === "beat") { c.fillStyle = "rgba(255,255,255,.7)"; c.font = "6px monospace"; c.fillText("♪", hx + 10, hy - 2 - beat * 2); }
+  },
+  drawBoba(c, x, y) {
+    c.fillStyle = "rgba(255,255,255,.25)"; c.fillRect(x, y, 10, 18);
+    c.fillStyle = "#c79a6b"; c.fillRect(x + 1, y + 4, 8, 13);
+    c.fillStyle = "#3b2416"; for (let i = 0; i < 6; i++) c.fillRect(x + 1 + (i % 3) * 3, y + 13 + Math.floor(i / 3) * 2, 2, 2);
+    c.fillStyle = "#e85d75"; c.fillRect(x + 6, y - 6, 2, 10);
+  },
+  drawLamp(c, x, y) {
+    c.fillStyle = "rgba(242,180,90,.15)"; c.beginPath(); c.moveTo(x - 4, y + 6); c.lineTo(x - 22, y + 30); c.lineTo(x + 14, y + 30); c.closePath(); c.fill();
+    c.fillStyle = "#3d6b5a"; c.fillRect(x - 6, y, 12, 6); c.fillStyle = "#f2b45a"; c.fillRect(x - 4, y + 6, 8, 1);
+    c.fillStyle = "#2b2522"; c.fillRect(x, y + 7, 2, 23); c.fillRect(x - 4, y + 28, 10, 2);
+  },
+  drawCooker(c, x, y) { // 大同電鍋
+    c.fillStyle = "#e7dfd2"; c.fillRect(x, y + 3, 16, 9); c.fillStyle = "#cfc6b6"; c.fillRect(x + 1, y, 14, 3);
+    c.fillStyle = "#c63b2f"; c.fillRect(x, y + 7, 16, 2); c.fillStyle = "#2b2522"; c.fillRect(x + 7, y - 2, 2, 2);
+  },
+  loop() {
+    let last = performance.now();
+    const step = (now) => {
+      const dt = Math.min(100, now - last); last = now;
+      this.update(now, dt); this.draw(now);
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  },
+};
+$("#pet").addEventListener("click", () => {
+  Pet.pettedAt = performance.now(); Pet.actionUntil = 0;
+  Sound.oneShotPurr(); toast("呼嚕呼嚕…", 1200);
+});
+
+/* =========================================================================
+ * 6. Web Audio：四軌混音（BGM / 鏡頭環境音 / 桌面 ASMR / 直播原音）
+ *    素材全部即時合成，不需任何音檔
+ * ========================================================================= */
+const Sound = {
+  ctx: null, BPM: 72, bgmOn: false,
+  gains: {}, levels: { bgm: 0.45, amb: 0.55, asmr: 0.25, live: 0 },
+  ambient: null, ambientProfile: "ocean_waves",
+  masterLevel() { return 1; },
+
+  init() {
+    if (this.ctx) { this.ctx.resume(); return; }
+    const ctx = this.ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "playback" });
+    this.master = ctx.createDynamicsCompressor(); this.master.threshold.value = -14; this.master.ratio.value = 3;
+    this.master.connect(ctx.destination);
+    for (const k of ["bgm", "amb", "asmr"]) { const g = ctx.createGain(); g.gain.value = this.levels[k]; g.connect(this.master); this.gains[k] = g; }
+    // Track 1 的低通：平常 18kHz（透明），專注時 900Hz（悶、暖）
+    this.lpf = ctx.createBiquadFilter(); this.lpf.type = "lowpass"; this.lpf.frequency.value = 18000; this.lpf.Q.value = 0.5;
+    this.lpf.connect(this.gains.bgm);
+    this.noise = { white: this.makeNoise("white"), pink: this.makeNoise("pink"), brown: this.makeNoise("brown") };
+    this.startBGM();
+    this.setAmbientProfile(this.ambientProfile, true);
+    this.setASMR($("#asmr-select").value);
+  },
+
+  makeNoise(type) {
+    const ctx = this.ctx, len = ctx.sampleRate * 4, buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+    let b0 = 0, b1 = 0, b2 = 0, last = 0;
+    for (let i = 0; i < len; i++) {
+      const w = Math.random() * 2 - 1;
+      if (type === "white") d[i] = w * 0.5;
+      else if (type === "pink") { b0 = 0.99765 * b0 + w * 0.099046; b1 = 0.963 * b1 + w * 0.2965164; b2 = 0.57 * b2 + w * 1.0526913; d[i] = (b0 + b1 + b2 + w * 0.1848) * 0.11; }
+      else { last = (last + 0.02 * w) / 1.02; d[i] = last * 3.5; }
+    }
+    return buf;
+  },
+  noiseSrc(type) { const s = this.ctx.createBufferSource(); s.buffer = this.noise[type]; s.loop = true; s.loopStart = Math.random(); return s; },
+  lfoBag: null, // 建立環境音時暫存 LFO，切換時一併停止，避免振盪器越積越多
+  lfo(freq, depth, target) {
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.frequency.value = freq; g.gain.value = depth; o.connect(g); g.connect(target); o.start();
+    if (this.lfoBag) this.lfoBag.push(o);
+    return o;
+  },
+  setLevel(track, v01) {
+    this.levels[track] = v01;
+    if (track === "live") { Player.setLiveVolume(v01); return; }
+    if (this.ctx) this.gains[track].gain.setTargetAtTime(v01, this.ctx.currentTime, 0.08);
+  },
+  setLowpass(on) {
+    $("#btn-lpf").setAttribute("aria-pressed", String(on));
+    if (!this.ctx) return;
+    // 指數斜坡 1.5 秒，避免濾波器跳變的爆音
+    const f = this.lpf.frequency, t = this.ctx.currentTime;
+    f.cancelScheduledValues(t); f.setValueAtTime(f.value, t); f.exponentialRampToValueAtTime(on ? 900 : 18000, t + 1.5);
+  },
+
+  /* ---- Track 1：Lo-Fi 鼓組 + 七和弦 pad + 黑膠雜音，lookahead 排程 ---- */
+  startBGM() {
+    const ctx = this.ctx; this.bgmOn = true;
+    const chords = [[53, 57, 60, 64], [52, 55, 59, 62], [50, 53, 57, 60], [48, 52, 55, 59]]; // Fmaj7 Em7 Dm7 Cmaj7
+    const spb = 60 / this.BPM, step = spb / 2; // 8 分音符
+    let next = ctx.currentTime + 0.1, i = 0;
+    const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+    const env = (g, t, a, peak, r) => { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + r); };
+    const kick = (t) => { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.18); env(g, t, 0.005, 0.5, 0.3); o.connect(g).connect(this.lpf); o.start(t); o.stop(t + 0.4); };
+    const noiseHit = (t, f, q, peak, r) => { const s = this.noiseSrc("white"), bp = ctx.createBiquadFilter(), g = ctx.createGain(); bp.type = "bandpass"; bp.frequency.value = f; bp.Q.value = q; env(g, t, 0.003, peak, r); s.connect(bp).connect(g).connect(this.lpf); s.start(t); s.stop(t + r + 0.05); };
+    const pad = (t, notes, dur) => {
+      for (const n of notes) for (const det of [-6, 6]) {
+        const o = ctx.createOscillator(), g = ctx.createGain(), lp = ctx.createBiquadFilter();
+        o.type = "triangle"; o.frequency.value = mtof(n); o.detune.value = det + rand(-3, 3);
+        lp.type = "lowpass"; lp.frequency.value = 1400;
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.03, t + 0.4); g.gain.setValueAtTime(0.03, t + dur - 0.5); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        o.connect(lp).connect(g).connect(this.lpf); o.start(t); o.stop(t + dur + 0.05);
+      }
+    };
+    // 黑膠底噪
+    const vinyl = this.noiseSrc("pink"), vg = ctx.createGain(), vhp = ctx.createBiquadFilter();
+    vhp.type = "highpass"; vhp.frequency.value = 2500; vg.gain.value = 0.05; vinyl.connect(vhp).connect(vg).connect(this.lpf); vinyl.start();
+    this.bgmTimer = setInterval(() => {
+      while (next < ctx.currentTime + 0.25) {
+        const s = i % 32, bar = Math.floor(i / 8) % 4;
+        const swing = (s % 2) ? step * 0.12 : 0;           // 搖擺 12%
+        const t = next + swing;
+        if (s % 8 === 0) pad(t, chords[bar], spb * 4);
+        if (s % 8 === 0 || s % 8 === 5) kick(t);
+        if (s % 8 === 4) noiseHit(t, 1800, 0.8, 0.22, 0.18);   // 小鼓
+        noiseHit(t, 8000, 1.5, s % 2 ? 0.04 : 0.07, 0.05);      // hi-hat
+        next += step; i++;
+      }
+    }, 25);
+  },
+
+  /* ---- Track 2：鏡頭自適應環境音，3 秒等功率交叉淡化 ---- */
+  recipes: {
+    // 浪：棕噪音 + 低通 + 0.09Hz 音量 LFO（約 11 秒一道浪）
+    ocean(A, out) { const s = A.noiseSrc("brown"), lp = A.ctx.createBiquadFilter(), g = A.ctx.createGain(); lp.type = "lowpass"; lp.frequency.value = 700; g.gain.value = 0.55; A.lfo(0.09, 0.35, g.gain); A.lfo(0.09, 300, lp.frequency); s.connect(lp).connect(g).connect(out); s.start(); return [s]; },
+    // 溪流：白噪音 + 帶通 1.4kHz
+    river(A, out) { const s = A.noiseSrc("white"), bp = A.ctx.createBiquadFilter(), g = A.ctx.createGain(); bp.type = "bandpass"; bp.frequency.value = 1400; bp.Q.value = 0.6; g.gain.value = 0.5; A.lfo(0.3, 0.06, g.gain); s.connect(bp).connect(g).connect(out); s.start(); return [s]; },
+    // 山風：粉紅噪音 + 帶通掃頻；夜間加蟋蟀（4.6kHz 正弦 AM）
+    wind(A, out) {
+      const s = A.noiseSrc("pink"), bp = A.ctx.createBiquadFilter(), g = A.ctx.createGain();
+      bp.type = "bandpass"; bp.frequency.value = 600; bp.Q.value = 1.2; A.lfo(0.05, 350, bp.frequency); g.gain.value = 0.6; A.lfo(0.07, 0.25, g.gain);
+      s.connect(bp).connect(g).connect(out); s.start(); const nodes = [s];
+      if (["dusk", "night"].includes(currentSlot())) {
+        const o = A.ctx.createOscillator(), cg = A.ctx.createGain(); o.frequency.value = 4600; cg.gain.value = 0; A.lfo(18, 0.012, cg.gain);
+        o.connect(cg).connect(out); o.start(); nodes.push(o);
+      } else {
+        const o = A.ctx.createOscillator(), cg = A.ctx.createGain(); o.frequency.value = 5200; o.type = "sawtooth"; cg.gain.value = 0; A.lfo(45, 0.004, cg.gain);
+        o.connect(cg).connect(out); o.start(); nodes.push(o); // 蟬鳴
+      }
+      return nodes;
+    },
+    // 車流：棕噪音低通 180Hz（遠方嗡鳴）+ 隨機機車經過（帶通掃頻）
+    traffic(A, out) {
+      const s = A.noiseSrc("brown"), lp = A.ctx.createBiquadFilter(), g = A.ctx.createGain(); lp.type = "lowpass"; lp.frequency.value = 180; g.gain.value = 0.9;
+      s.connect(lp).connect(g).connect(out); s.start();
+      const pass = () => {
+        if (!A.ctx || A.ambient?.out !== out) return;
+        const t = A.ctx.currentTime, n = A.noiseSrc("pink"), bp = A.ctx.createBiquadFilter(), pg = A.ctx.createGain();
+        bp.type = "bandpass"; bp.Q.value = 2; bp.frequency.setValueAtTime(300, t); bp.frequency.linearRampToValueAtTime(900, t + 1.2); bp.frequency.linearRampToValueAtTime(350, t + 3);
+        pg.gain.setValueAtTime(0.0001, t); pg.gain.exponentialRampToValueAtTime(0.35, t + 1.2); pg.gain.exponentialRampToValueAtTime(0.0001, t + 3);
+        n.connect(bp).connect(pg).connect(out); n.start(t); n.stop(t + 3.1);
+        setTimeout(pass, rand(3000, 12000));
+      };
+      setTimeout(pass, 1500); return [s];
+    },
+  },
+  profileToRecipe(p) {
+    if (/ocean|harbor|rocky|island|underwater/.test(p)) return "ocean";
+    if (/river|waterfall|lake|wetland/.test(p)) return "river";
+    if (/highway|tunnel|intersection|rooftop|airport|old_street/.test(p)) return "traffic";
+    return "wind"; // mountain / forest / alpine / city_night_view / railway
+  },
+  setAmbientProfile(profile, force = false) {
+    this.ambientProfile = profile || "ocean_waves";
+    if (!this.ctx) return;
+    const recipe = this.profileToRecipe(this.ambientProfile);
+    if (!force && this.ambient && this.ambient.recipe === recipe) return;
+    const ctx = this.ctx, t = ctx.currentTime, DUR = 3, N = 64;
+    // 等功率曲線：新 = sin(x·π/2)，舊 = cos(x·π/2)，兩者平方和恆為 1，交界處不會掉音量
+    const fadeIn = new Float32Array(N), fadeOut = new Float32Array(N);
+    for (let i = 0; i < N; i++) { const x = i / (N - 1); fadeIn[i] = Math.sin(x * Math.PI / 2); fadeOut[i] = Math.cos(x * Math.PI / 2); }
+    const out = ctx.createGain(); out.gain.value = 0; out.connect(this.gains.amb);
+    this.lfoBag = [];
+    const nodes = this.recipes[recipe](this, out).concat(this.lfoBag);
+    this.lfoBag = null;
+    out.gain.setValueCurveAtTime(fadeIn, t, DUR);
+    const old = this.ambient;
+    if (old) {
+      old.out.gain.cancelScheduledValues(t);
+      old.out.gain.setValueCurveAtTime(fadeOut.map((v) => v * old.out.gain.value), t, DUR);
+      setTimeout(() => { old.nodes.forEach((n) => { try { n.stop(); } catch {} }); old.out.disconnect(); }, DUR * 1000 + 200);
+    }
+    this.ambient = { recipe, out, nodes };
+  },
+
+  /* ---- Track 3：桌面 ASMR ---- */
+  setASMR(kind) {
+    if (!this.ctx) return;
+    clearTimeout(this.asmrTimer); if (this.asmrNode) { try { this.asmrNode.stop(); } catch {} this.asmrNode = null; }
+    const ctx = this.ctx, out = this.gains.asmr;
+    const click = (f, q, peak, r) => { const t = ctx.currentTime, s = this.noiseSrc("white"), bp = ctx.createBiquadFilter(), g = ctx.createGain(); bp.type = "bandpass"; bp.frequency.value = f; bp.Q.value = q; g.gain.setValueAtTime(peak, t); g.gain.exponentialRampToValueAtTime(0.0001, t + r); s.connect(bp).connect(g).connect(out); s.start(t); s.stop(t + r + 0.02); };
+    if (kind === "purr") { this.asmrNode = this.purr(out, 0.5); return; }
+    const sched = () => {
+      if (kind === "typing") {   // 一陣 4–12 下，間隔 70–220ms，再停 1–4 秒
+        let n = Math.floor(rand(4, 12)), t = 0;
+        while (n--) { t += rand(70, 220); setTimeout(() => click(rand(2500, 4200), 3, 0.35, 0.03), t); }
+        this.asmrTimer = setTimeout(sched, t + rand(1000, 4000));
+      } else if (kind === "ice") { // 冰塊：高頻短敲 2–5 下，間隔 3–9 秒
+        let n = Math.floor(rand(2, 5)), t = 0;
+        while (n--) { t += rand(40, 140); setTimeout(() => click(rand(5000, 8000), 12, 0.25, 0.06), t); }
+        this.asmrTimer = setTimeout(sched, t + rand(3000, 9000));
+      } else if (kind === "pencil") { // 鉛筆：帶通 3kHz 長擦聲
+        const t = ctx.currentTime, s = this.noiseSrc("white"), bp = ctx.createBiquadFilter(), g = ctx.createGain(), d = rand(0.25, 0.9);
+        bp.type = "bandpass"; bp.frequency.value = 3200; bp.Q.value = 1.5;
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12, t + 0.05); g.gain.setValueAtTime(0.12, t + d - 0.05); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+        s.connect(bp).connect(g).connect(out); s.start(t); s.stop(t + d + 0.05);
+        this.asmrTimer = setTimeout(sched, d * 1000 + rand(150, 1500));
+      }
+    };
+    sched();
+  },
+  // 呼嚕：25Hz 鋸齒波 → 低通 300Hz，以 0.45Hz（吸吐）做 AM
+  purr(out, level) {
+    const ctx = this.ctx, o = ctx.createOscillator(), lp = ctx.createBiquadFilter(), g = ctx.createGain();
+    o.type = "sawtooth"; o.frequency.value = 25; lp.type = "lowpass"; lp.frequency.value = 300;
+    g.gain.value = level * 0.5; const l = this.lfo(0.45, level * 0.4, g.gain);
+    o.connect(lp).connect(g).connect(out); o.start();
+    return { stop() { o.stop(); l.stop(); } };
+  },
+  oneShotPurr() {
+    if (!this.ctx) return;
+    const g = this.ctx.createGain(); g.gain.value = 0.6; g.connect(this.master);
+    const o = this.purr(g, 0.6); g.gain.setTargetAtTime(0, this.ctx.currentTime + 2.5, 0.4);
+    setTimeout(() => { o.stop(); g.disconnect(); }, 4500);
+  },
+  chime() { // 番茄鐘結束：兩聲鐘
+    if (!this.ctx) return;
+    [0, 0.35].forEach((d, k) => {
+      const t = this.ctx.currentTime + d, o = this.ctx.createOscillator(), g = this.ctx.createGain();
+      o.frequency.value = k ? 1046.5 : 784; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.6);
+      o.connect(g).connect(this.master); o.start(t); o.stop(t + 1.7);
+    });
+  },
+};
+
+/* =========================================================================
+ * 7. 番茄鐘 + 心靈點數（用時間戳計算，背景分頁被節流也不會跑慢）
+ * ========================================================================= */
+const MP_RULES = {
+  focusPerMin: 1.0,                    // 番茄鐘專注中每分鐘 1 MP
+  breakPerMin: 0.2,                    // 休息中每分鐘 0.2 MP
+  freePerMin: 0.4,                     // 自由慢電視每分鐘 0.4 MP
+  sessionBonus: 10,                    // 完成一輪專注 +10
+  comboMultiplier: [1.0, 1.1, 1.2, 1.5],// 連續第 1/2/3/4 輪的倍率
+  freeDailyCap: 120,                   // 自由模式每日上限（防掛機刷點）
+};
+const Pomodoro = {
+  mode: "pomodoro", phase: "focus", running: false, endAt: 0, remain: 25 * 60e3, round: 1, combo: 0,
+  durations: { focus: 25 * 60e3, short: 5 * 60e3, long: 15 * 60e3 },
+  mp: store.get("mp", 0), freeToday: store.get("freeToday", { d: "", v: 0 }), lastTick: 0, justFinished: 0,
+
+  start() {
+    if (this.running) return this.pause();
+    Sound.init(); this.running = true; this.lastTick = Date.now();
+    if (this.mode === "pomodoro") this.endAt = Date.now() + this.remain;
+    Sound.setLowpass(this.mode === "pomodoro" && this.phase === "focus"); // 專注時 BGM 自動變悶
+    $("#btn-start").textContent = "暫停"; Pet.actionUntil = 0;
+  },
+  pause() {
+    this.running = false; if (this.mode === "pomodoro") this.remain = Math.max(0, this.endAt - Date.now());
+    $("#btn-start").textContent = "繼續"; Sound.setLowpass(false);
+  },
+  reset() {
+    this.running = false; this.phase = "focus"; this.round = 1; this.combo = 0; this.remain = this.durations.focus; this.elapsed = 0;
+    $("#btn-start").textContent = "開始"; Sound.setLowpass(false); this.render();
+  },
+  toggleMode() {
+    this.mode = this.mode === "pomodoro" ? "free" : "pomodoro";
+    $("#btn-mode").setAttribute("aria-pressed", String(this.mode === "free"));
+    this.reset();
+  },
+  tick() {
+    const now = Date.now();
+    if (this.running) {
+      const mins = (now - this.lastTick) / 60000; this.lastTick = now;
+      if (this.mode === "free") {
+        this.elapsed = (this.elapsed || 0) + mins * 60000;
+        const today = new Date().toDateString();
+        if (this.freeToday.d !== today) this.freeToday = { d: today, v: 0 };
+        const gain = Math.min(mins * MP_RULES.freePerMin, MP_RULES.freeDailyCap - this.freeToday.v);
+        if (gain > 0) { this.freeToday.v += gain; this.addMP(gain); }
+      } else {
+        const rate = this.phase === "focus" ? MP_RULES.focusPerMin * MP_RULES.comboMultiplier[Math.min(this.combo, 3)] : MP_RULES.breakPerMin;
+        this.addMP(mins * rate);
+        this.remain = Math.max(0, this.endAt - now);
+        if (this.remain === 0) this.nextPhase();
+      }
+    }
+    this.render();
+  },
+  nextPhase() {
+    Sound.chime(); this.justFinished = performance.now(); Pet.actionUntil = 0;
+    if (this.phase === "focus") {
+      this.combo++; this.addMP(MP_RULES.sessionBonus * MP_RULES.comboMultiplier[Math.min(this.combo - 1, 3)]);
+      this.phase = this.round % 4 === 0 ? "long" : "short";
+      toast(this.phase === "long" ? "完成 4 輪！長休息 15 分鐘" : "專注完成，起來伸個懶腰"); Sound.setLowpass(false);
+    } else {
+      this.phase = "focus"; this.round++; toast("休息結束，回來專注吧"); Sound.setLowpass(true);
+    }
+    this.remain = this.durations[this.phase]; this.endAt = Date.now() + this.remain;
+  },
+  addMP(v) { this.mp += v; store.set("mp", this.mp); store.set("freeToday", this.freeToday); },
+  render() {
+    const fmt = (ms) => { const s = Math.round(ms / 1000); return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; };
+    if (this.mode === "free") {
+      $("#timer-label").textContent = "自由慢電視";
+      $("#timer").textContent = fmt(this.elapsed || 0);
+      $("#timer-sub").textContent = `今日自由模式點數 ${this.freeToday.v.toFixed(1)} / ${MP_RULES.freeDailyCap}`;
+    } else {
+      $("#timer-label").textContent = { focus: "番茄鐘・專注", short: "番茄鐘・短休息", long: "番茄鐘・長休息" }[this.phase];
+      $("#timer").textContent = fmt(this.remain);
+      $("#timer-sub").textContent = `第 ${this.round} 輪・連續 ${this.combo} 輪（×${MP_RULES.comboMultiplier[Math.min(this.combo, 3)]}）`;
+    }
+    $("#mp").textContent = Math.floor(this.mp);
+  },
+};
+
+/* =========================================================================
+ * 8. 介面綁定
+ * ========================================================================= */
+function bindToggle(btn, fn) { $(btn).addEventListener("click", (e) => { const on = e.currentTarget.getAttribute("aria-pressed") !== "true"; e.currentTarget.setAttribute("aria-pressed", String(on)); fn(on); }); }
+bindToggle("#btn-crt", (on) => { $("#stage").classList.toggle("crt", on); Grain.on = on; });
+bindToggle("#btn-blur", (on) => $("#layer0").classList.toggle("soft-focus", on));
+bindToggle("#btn-rain", (on) => { $("#stage").classList.toggle("raining", on); on ? Rain.start() : Rain.stop(); });
+bindToggle("#btn-mini", (on) => document.body.classList.toggle("mini", on));
+bindToggle("#btn-lpf", (on) => { Sound.init(); Sound.setLowpass(on); });
+$("#btn-full").addEventListener("click", () => document.fullscreenElement ? document.exitFullscreen() : $("#stage").requestFullscreen?.());
+$("#btn-start").addEventListener("click", () => Pomodoro.start());
+$("#btn-reset").addEventListener("click", () => Pomodoro.reset());
+$("#btn-mode").addEventListener("click", () => Pomodoro.toggleMode());
+$("#btn-audio").addEventListener("click", (e) => { Sound.init(); e.currentTarget.textContent = "聲音已開"; e.currentTarget.disabled = true; });
+$("#btn-smart").addEventListener("click", () => { const c = smartPick(Player.current?.cam?.id); selectCamera(c.id); toast(`現在是「${{ dawn: "清晨", day: "白天", dusk: "黃昏", night: "深夜" }[currentSlot()]}」，前往 ${c.name}`); });
+$("#cam-select").addEventListener("change", (e) => selectCamera(e.target.value));
+$("#url-input").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  const s = detectStream(e.target.value);
+  if (s.kind === "unknown") { toast("只支援 YouTube 網址或 .m3u8"); return; }
+  Player.play(s, null);
+});
+$("#asmr-select").addEventListener("change", (e) => Sound.setASMR(e.target.value));
+document.querySelectorAll("#mixer input").forEach((inp) => {
+  const track = { "v-bgm": "bgm", "v-amb": "amb", "v-asmr": "asmr", "v-live": "live" }[inp.id];
+  inp.addEventListener("input", () => { inp.nextElementSibling.value = inp.value; Sound.setLevel(track, inp.value / 100); });
+});
+// 有操作時喚醒 UI，3 秒後淡出；同時重設寵物的「放空」計時
+let awakeT;
+["mousemove", "keydown", "pointerdown"].forEach((ev) => addEventListener(ev, () => {
+  document.body.classList.add("ui-awake"); clearTimeout(awakeT); awakeT = setTimeout(() => document.body.classList.remove("ui-awake"), 3000);
+  Pet.lastInput = performance.now();
+}, { passive: true }));
+// 背景分頁：暫停 BGM 排程以外的視覺工作（rAF 本身會被瀏覽器暫停）
+document.addEventListener("visibilitychange", () => { if (!document.hidden) Pomodoro.lastTick = Date.now(); });
+
+/* =========================================================================
+ * 9. 開機
+ * ========================================================================= */
+(async function boot() {
+  Grain.tick(); Pet.loop();
+  if (matchMedia("(max-width: 640px)").matches) $("#mix-wrap").open = false; // 手機先收合混音台，讓出畫面
+  setInterval(() => Pomodoro.tick(), 1000); Pomodoro.render();
+  await loadCameras();
+  const q = new URLSearchParams(location.search);
+  if (q.get("url")) { const s = detectStream(q.get("url")); $("#url-input").value = q.get("url"); Player.play(s, null); return; }
+  const last = store.get("lastCam", null);
+  const cam = (last && camById(last)) || smartPick();
+  selectCamera(cam.id);
+})();
+</script>
+</body>
+</html>

@@ -1,6 +1,24 @@
-# Lo-Fi Taiwan Patrol：鏡頭資料管線
+# Lo-Fi Taiwan Patrol（台灣慢電視漫遊者）
 
-把 `data/cameras_source.csv`（579 筆台灣即時影像）轉成遊戲用的 `cameras.json`。
+真實台灣即時鏡頭 + Lo-Fi 音樂 + 像素貓的桌面伴讀軟體。
+
+| 檔案 | 內容 |
+|---|---|
+| [`DESIGN.md`](DESIGN.md) | 六大模組企劃與技術藍圖（GDD、資料管線、視覺、音訊、架構、MVP） |
+| [`index.html`](index.html) | MVP 原型：YouTube／HLS 自動判斷、CRT 濾鏡、像素貓行為樹、四軌混音、番茄鐘 |
+| [`build_cameras.py`](build_cameras.py) | 資料管線：CSV → `cameras.json` |
+| `cameras.json` | 579 台鏡頭（由腳本產生） |
+| `data/cameras_source.csv` | 原始資料 |
+
+## 執行 MVP
+
+```bash
+python3 -m http.server 8000
+# 開 http://localhost:8000/
+# 指定串流：http://localhost:8000/?url=<YouTube 或 .m3u8 網址>
+```
+
+## 重建鏡頭資料
 
 ```bash
 python3 build_cameras.py data/cameras_source.csv -o cameras.json          # 保留全部 579 筆
@@ -9,6 +27,4 @@ python3 build_cameras.py data/cameras_source.csv -o cameras.json --resolve-hls-p
 ```
 
 - 只用 Python 標準函式庫（3.9 以上）。
-- 分類順序：人工覆寫 → HLS 監控 → 離島 → 海 → 水岸 → 山 → 都市景點；每筆都在 `classification.rule` 記下命中的規則。
-- `ambient_sound_profile` 對應到 `ambient_profiles` 裡的混音層設定（給 Web Audio 的 Track 2 使用）。
-- 臺北市 415 筆 `hls.bote.gov.taipei/live/index.html?id=NNN` 是播放器網頁，不是 m3u8，所以標記為 `player.needs_resolve: true`。
+- 臺北市 415 筆 `hls.bote.gov.taipei/live/index.html?id=NNN` 是播放器網頁，不是 m3u8，標記為 `player.needs_resolve: true`，MVP 會自動略過。
